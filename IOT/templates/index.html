@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoring Car</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css"
+    integrity="sha512-xodZBNTC5n17Xt2atTPuE1HxjVMSvLVW9ocqUKLsCC5CXdbqCmblAshOMAS6/keqq/sMZMZ19scR4PsZChSR7A=="
+    crossorigin=""/>
+    <!-- Make sure you put this AFTER Leaflet's CSS -->
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"
+    integrity="sha512-XQoYMqMTK8LvdxXYG3nZ448hOEQiglfqkJs1NOQV44cWnUrBc8PkAOcXy20w0vlaXaVUearIOBhiXZ5V3ynxwA=="
+    crossorigin=""></script>
+    <link rel="stylesheet" type="text/css" href="../static/style.css" />
+    <style>
+        #map { height: 200px; width: 80%; margin: 0 auto; margin-top: 100px; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="controller" style="text-align:center; margin:10px;">
+      <button id ="F">FOWARD</button></br>
+      <button id ="L">TURN LEFT</button>
+      <button id ="S">STOP</button>
+      <button id ="R">TURN RIGHT</button></br>
+      <button id ="B">BACK</button>
+    </div>
+</body>
+<script src="../static/main.js"></script>
+<script src="../static/manual_control.js"></script>
+<script src="../static/receivedGPScar.js"></script>
+</html>

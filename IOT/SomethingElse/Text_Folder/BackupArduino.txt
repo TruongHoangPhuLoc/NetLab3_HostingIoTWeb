@@ -1,0 +1,496 @@
+#define ENB   D6          // Enable/speed motors Left         GPIO12(D6)
+#define IN_3  D4          // L298N in3 motors Left            GPIO2(D4)
+#define IN_4  D3          // L298N in4 motors Left            GPIO0(D3)
+#define SERVO D5
+#define EMERGENCY_REDLED D7
+#define EMERGENCY_GREENLED D8
+#include <Wire.h>
+#include <HMC5883L.h>
+#include <MPU6050.h>
+#include <Servo.h>
+#include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266WiFiMulti.h>
+#include <ESP8266HTTPClient.h>
+#include <WiFiClient.h>
+const char* ssid = "PhuLoc";
+const char* password = "0935341875";
+String ip_address = "192.168.1.8"; // address's server
+String url = "http://" + ip_address + "/get_instruction";
+HMC5883L compass;
+MPU6050 mpu;
+char current_direction = 'S';
+int global_heading = 0; //use to save origin heading
+int storage_global_heading = 0; //use to save constant global heading because global heading can be changed when the car rotate left or right
+int default_compass = 91; //that is val of compass
+Servo servo;
+bool completed_rotation = false;
+ESP8266WiFiMulti WiFiMulti;
+int speedCar = 1023;
+int ledState = LOW;
+unsigned long previousMillis = 0;
+const long interval = 500;
+void setupEmergencyLed()
+{
+  pinMode(EMERGENCY_REDLED, OUTPUT);
+  pinMode(EMERGENCY_GREENLED, OUTPUT);
+}
+void setupHTTPClient() {
+  WiFi.mode(WIFI_STA);
+  WiFiMulti.addAP(ssid, password);
+}
+void setupOriginHeading()
+{
+  global_heading = round(readHeading());
+  storage_global_heading = global_heading;
+}
+void setupServo()
+{
+  servo.attach(D5);
+  servo.write(default_compass);
+}
+void setupMotor()
+{
+  pinMode(ENB, OUTPUT);
+  pinMode(IN_3, OUTPUT);
+  pinMode(IN_4, OUTPUT);
+}
+void setupCompass()
+{
+  while (!mpu.begin(MPU6050_SCALE_2000DPS, MPU6050_RANGE_2G))
+  {
+    Serial.println("Could not find a valid MPU6050 sensor, check wiring!");
+    delay(500);
+  }
+
+  mpu.setI2CMasterModeEnabled(false);
+  mpu.setI2CBypassEnabled(true) ;
+  mpu.setSleepEnabled(false);
+
+  // Initialize Initialize HMC5883L
+  Serial.println("Initialize HMC5883L");
+  while (!compass.begin())
+  {
+    Serial.println("Could not find a valid HMC5883L sensor, check wiring!");
+    delay(500);
+  }
+
+  // Set measurement range
+  compass.setRange(HMC5883L_RANGE_1_3GA);
+
+  // Set measurement mode
+  compass.setMeasurementMode(HMC5883L_CONTINOUS);
+
+  // Set data rate
+  compass.setDataRate(HMC5883L_DATARATE_30HZ);
+
+  // Set number of samples averaged
+  compass.setSamples(HMC5883L_SAMPLES_8);
+
+  // Set calibration offset. See HMC5883L_calibration.ino
+  compass.setOffset(0, 0);
+}
+void setup()
+{
+  Serial.begin(115200);
+  setupMotor();
+  setupCompass();
+  setupServo();
+  setupOriginHeading();
+  setupHTTPClient();
+  setupEmergencyLed();
+  Serial.print("SET UP IS CALLED\n");
+}
+//int getMin(int origin_heading, int temp_heading)
+//{
+//  if(origin_heading > temp_heading)
+//  {
+//    return temp_heading;
+//  }
+//  return origin_heading;
+//}
+//int getMax(int origin_heading, int temp_heading)
+//{
+//  if(origin_heading > temp_heading)
+//  {
+//    return origin_heading;
+//  }
+//  return temp_heading;
+//}
+bool isSpecialCase(int origin_heading, int temp_heading)
+{
+  if (origin_heading > 270 && origin_heading <= 360 && temp_heading > 0 && temp_heading <= 90)
+  {
+    return true;
+  }
+  if (temp_heading > 270 && temp_heading <= 360 && origin_heading > 0 && origin_heading <= 90)
+  {
+    return true;
+  }
+  return false;
+}
+int get_subtraction(int origin_heading, int temp_heading)
+{
+  int subtraction = origin_heading - temp_heading;
+  int result = 0;
+  if (abs(subtraction) > 180)
+  {
+    if (isSpecialCase(origin_heading, temp_heading) == true)
+    {
+      int min_degree = min(origin_heading, temp_heading);
+      int max_degree = max(origin_heading, temp_heading);
+      result = min_degree + 360 - max_degree;
+      if (origin_heading > temp_heading)
+      {
+        return -result;
+      }
+      return result;
+    }
+    else
+    {
+      return 0;
+    }
+  }
+  result = subtraction;
+  return result;
+}
+bool validDegree(int degree)
+{
+  if (abs(degree) > 180)
+  {
+    return false;
+  }
+  return true;
+}
+//int get_subtraction(int origin_heading, int temp_heading)
+//{
+//  int subtraction = 0;
+//  if(isSpecialCase(origin_heading, temp_heading)== true)
+//  {
+//    int min_degree = min(origin_heading, temp_heading);
+//    int max_degree = max(origin_heading, temp_heading);
+//    subtraction = min_degree + 360 - max_degree;
+//    if(origin_heading > temp_heading)
+//    {
+//       subtraction = -subtraction;
+//    }
+//  }
+//  else
+//  {
+//    subtraction = origin_heading - temp_heading;
+//  }
+//  return subtraction;
+//}
+void stopRobot() {
+  digitalWrite(IN_3, LOW);
+  digitalWrite(IN_4, LOW);
+  analogWrite(ENB, 0);
+}
+void goAhead() {
+  int origin_heading = global_heading;
+  int temp_heading = round(readHeading());
+  //default value of goAhead = 90;
+  int default_value = default_compass;
+  int subtraction = get_subtraction(origin_heading, temp_heading);
+  Serial.print("origin ");
+  Serial.println(origin_heading);
+  Serial.print("temp ");
+  Serial.println(temp_heading);
+  Serial.print("subtraction ");
+  Serial.println(subtraction);
+  if (subtraction <= -5 || subtraction >= 5)
+  {
+    if (abs(subtraction) > 45)
+    {
+      if (subtraction < 0)
+      {
+        servo.write(default_value - 45);
+      }
+      else
+      {
+        servo.write(default_value + 45);
+      }
+    }
+    else
+    {
+      servo.write(default_value + subtraction);
+    }
+  }
+  else
+  {
+    servo.write(default_value);
+  }
+  digitalWrite(IN_3, LOW);
+  digitalWrite(IN_4, HIGH);
+  analogWrite(ENB, speedCar);
+}
+void goBack() {
+  digitalWrite(IN_3, HIGH);
+  digitalWrite(IN_4, LOW);
+  analogWrite(ENB, speedCar);
+}
+void goRight() {
+  int current_heading = round(readHeading());
+  global_heading += 90;
+  if(global_heading > 360)
+  {
+    //special case
+    global_heading -= 360;
+    while(current_heading > global_heading)
+    {
+      Serial.println(global_heading);
+      Serial.println(current_heading);
+      servo.write(default_compass + 45);
+      digitalWrite(IN_3, LOW);
+      digitalWrite(IN_4, HIGH);
+      analogWrite(ENB, speedCar);
+      current_heading = round(readHeading());
+    }
+  }
+  else
+  {
+    while(current_heading < global_heading)
+    {
+      Serial.println(global_heading);
+      Serial.println(current_heading);
+      servo.write(default_compass + 45);
+      digitalWrite(IN_3, LOW);
+      digitalWrite(IN_4, HIGH);
+      analogWrite(ENB, speedCar);
+      current_heading = round(readHeading());
+    }
+  }
+  servo.write(default_compass);
+  current_direction = 'R';
+  completed_rotation = true;
+}
+void goLeft() {
+  int current_heading = round(readHeading());
+  global_heading -= 90;
+  if(global_heading < 0)
+  {
+    //special case
+    global_heading += 360;
+    while(current_heading < global_heading)
+    {
+      servo.write(default_compass - 45);
+      digitalWrite(IN_3, LOW);
+      digitalWrite(IN_4, HIGH);
+      analogWrite(ENB, speedCar);
+      current_heading = round(readHeading());
+    }
+  }
+  else
+  {
+    while(current_heading > global_heading)
+    {
+      servo.write(default_compass - 45);
+      digitalWrite(IN_3, LOW);
+      digitalWrite(IN_4, HIGH);
+      analogWrite(ENB, speedCar);
+      current_heading = round(readHeading());
+    }
+  }
+  servo.write(default_compass);
+  current_direction = 'L';
+  completed_rotation = true;
+}
+float readHeading()
+{
+  Vector norm = compass.readNormalize();
+
+  // Calculate heading
+  float heading = atan2(norm.YAxis, norm.XAxis);
+
+  // Set declination angle on your location and fix heading
+  // You can find your declination on: http://magnetic-declination.com/
+  // (+) Positive or (-) for negative
+  // For Bytom / Poland declination angle is 4'26E (positive)
+  // Formula: (deg + (min / 60.0)) / (180 / M_PI);
+  float declinationAngle = (4.0 + (26.0 / 60.0)) / (180 / M_PI);
+  heading += declinationAngle;
+
+  // Correct for heading < 0deg and heading > 360deg
+  if (heading < 0)
+  {
+    heading += 2 * PI;
+  }
+
+  if (heading > 2 * PI)
+  {
+    heading -= 2 * PI;
+  }
+
+  // Convert to degrees
+  float headingDegrees = heading * 180 / M_PI;
+  return headingDegrees;
+}
+char get_instruction(String url)
+{
+  char result = 0;
+  // wait for WiFi connection
+  if ((WiFiMulti.run() == WL_CONNECTED)) {
+
+    WiFiClient client;
+
+    HTTPClient http;
+
+    Serial.print("[HTTP] begin...\n");
+    if (http.begin(client, url)) {  // HTTP
+
+
+      Serial.print("[HTTP] GET...\n");
+      // start connection and send HTTP header
+      int httpCode = http.GET();
+
+      // httpCode will be negative on error
+      if (httpCode > 0) {
+        // HTTP header has been send and Server response header has been handled
+        Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+
+        // file found at server
+        if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
+          String payload = http.getString();
+          Serial.println(payload[0]);
+          switch (payload[0])
+          {
+            case 'F':
+              result = 'F';
+              break;
+            case 'B':
+              result = 'B';
+              break;
+            case 'L':
+              result = 'L';
+              break;
+            case 'R':
+              result = 'R';
+              break;
+            case 'S':
+              result = 'S';
+              break;
+          }
+        }
+      } else {
+        Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+      }
+
+      http.end();
+    } else {
+      Serial.printf("[HTTP} Unable to connect\n");
+    }
+  }
+  return result;
+}
+void manual_processing1()
+{
+  char instruction = get_instruction(url);
+  Serial.print("Instruction is: ");
+  Serial.println(instruction);
+  switch(instruction)
+  {
+    case 'F':
+    goAhead();
+    break;
+    case 'B':
+    goBack();
+    break;
+    case 'S':
+    stopRobot();
+    break;
+    case 'L':
+    if(!completed_rotation)
+    {
+      goLeft();
+    }
+    else
+    {
+      goAhead();
+    }
+    break;
+    case 'R':
+    if(!completed_rotation)
+    {
+      goRight();
+    }
+    else
+    {
+      goAhead();
+    }
+    break;
+    default:
+    current_direction = 'S';
+    stopRobot();
+  }
+  if(instruction != current_direction && completed_rotation == true)
+  {
+    completed_rotation = false;
+  }
+}
+void manual_processing2()
+{
+  char instruction = get_instruction(url);
+  Serial.print("Instruction is: ");
+  Serial.println(instruction);
+  switch(instruction)
+  {
+    case 'F':
+    goAhead();
+    break;
+    case 'B':
+    goBack();
+    break;
+    case 'L':
+    goManualLeft();
+    break;
+    case 'R':
+    goManualRight();
+    break;
+    case 'S':
+    stopRobot();
+    break;
+    default:
+    stopRobot();
+  }
+}
+void goManualLeft()
+{
+  servo.write(default_compass - 15);
+  digitalWrite(IN_3, LOW);
+  digitalWrite(IN_4, HIGH);
+  analogWrite(ENB, speedCar);
+  global_heading = round(readHeading());
+}
+void goManualRight()
+{
+  servo.write(default_compass + 15);
+  digitalWrite(IN_3, LOW);
+  digitalWrite(IN_4, HIGH);
+  analogWrite(ENB, speedCar);
+  global_heading = round(readHeading());
+}
+void emergencyLedProcessing()
+{
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= interval) {
+    // save the last time you blinked the LED
+    previousMillis = currentMillis;
+
+    // if the LED is off turn it on and vice-versa:
+    if (ledState == LOW) {
+      ledState = HIGH;
+    } else {
+      ledState = LOW;
+    }
+
+    // set the LED with the ledState of the variable:
+    digitalWrite(EMERGENCY_REDLED, ledState);
+    digitalWrite(EMERGENCY_GREENLED, !ledState);
+  }
+}
+void loop()
+{
+  emergencyLedProcessing();
+  manual_processing2();
+}
