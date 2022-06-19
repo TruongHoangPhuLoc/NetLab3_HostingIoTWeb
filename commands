@@ -1,0 +1,19 @@
+sudo apt update -y && sudo apt upgrade -y && sudo apt install apache2 -y && sudo apt install net-tools -y
+sudo apt-get install libapache2-mod-wsgi-py3
+sudo apt-get install git -y
+sudo a2enmod wsgi
+copy IOT into /var/www/FlaskApp
+copy flaskapp.wsgi into /var/www/FlaskApp
+copy FlaskApp.conf into /etc/apache2/sites-available
+sudo a2dissite 000-default.conf
+sudo a2ensite FlaskApp.conf
+sudo a2enmod ssl
+sudo systemctl restart apache2
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/apache-selfsigned.key -out /etc/ssl/certs/apache-selfsigned.crt
+sudo apt-get install python3-pip
+sudo pip install virtualenv
+sudo virtualenv venv
+source venv/bin/activate
+sudo pip install Flask
+deactive
+if you want to run wsgi application on port XXXX, you'll need to add port listening in /etc/apache2/ports.conf
